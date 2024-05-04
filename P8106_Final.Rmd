@@ -33,27 +33,178 @@ knitr::opts_chunk$set(
 ```
 
 ```{r, echo = TRUE, message = FALSE, results='hide', warning=FALSE}
-library(tidyverse)
 library(caret)
+library(MASS)
 library(mlbench)
 library(pROC)
+library(klaR)
+library(glmnet)
 library(pdp)
-library(ISLR)
-library(caret)
+library(vip)
 library(AppliedPredictiveModeling)
-library(tidymodels)
-library(factoextra)
+library(tidyverse)
+library(summarytools)
+library(corrplot)
+library(plotmo)
+library(viridis)
+library(gtsummary)
 library(e1071)
+library(tidymodels)
+library(patchwork)
 ```
 
 ## Data Import and Wrangling
 ```{r}
+load("severity_training.RData")
+load("severity_test.RData")
 
+skimr::skim(test_data)
+skimr::skim(training_data)
+# In total, 7 factor variables in the data
+
+train <- training_data %>%
+  janitor::clean_names() %>%
+  select(-id) %>%
+  select(age,height,weight,bmi,sbp,ldl,everything()) %>%
+  mutate(
+    gender = factor(gender,levels = c("0", "1"), labels = c("Female", "Male")),
+    race = factor(race,levels = c("1", "2","3","4")
+                  , labels = c("White", "Asian","Black","Hispanic")),
+    smoking = factor(smoking,levels = c("0","1", "2")
+                  , labels = c("Never smoked", "Former smoker","Current smoker")),
+    hypertension = factor(hypertension,levels = c("0", "1")
+                             , labels = c("No", "Yes")),
+    diabetes = factor(diabetes,levels = c("0", "1")
+                             , labels = c("No", "Yes")),
+    vaccine = factor(vaccine,levels = c("0", "1")
+                             , labels = c("Not vaccinated", "Vaccinated")),
+    severity = factor(severity,levels = c("0", "1")
+                             , labels = c("Not severe", "severe"))
+      )
+test <- test_data %>%
+  janitor::clean_names() %>%
+  select(-id) %>%
+  mutate(
+    gender = factor(gender,levels = c("0", "1"), labels = c("Female", "Male")),
+    race = factor(race,levels = c("1", "2","3","4")
+                  , labels = c("White", "Asian","Black","Hispanic")),
+    smoking = factor(smoking,levels = c("0","1", "2")
+                  , labels = c("Never smoked", "Former smoker","Current smoker")),
+    hypertension = factor(hypertension,levels = c("0", "1")
+                             , labels = c("No", "Yes")),
+    diabetes = factor(diabetes,levels = c("0", "1")
+                             , labels = c("No", "Yes")),
+    vaccine = factor(vaccine,levels = c("0", "1")
+                             , labels = c("Not vaccinated", "Vaccinated")),
+    severity = factor(severity,levels = c("0", "1")
+                             , labels = c("Not severe", "severe"))
+      )
+```
+
+## EDA
+
+We will use training data for EDA.
+
+### Outcome:severity
+```{r}
+# Bar chart
+y_bar <- train %>%
+  ggplot(aes(x = severity, fill = severity)) + 
+  geom_bar(stat = "Count", position = "dodge", alpha = 0.8) +
+  labs(x = "severity", fill = "severity",title = "Bar Chart of Severity of COVID-19
+       infection") + 
+  geom_text(stat = "Count", aes(label = after_stat(count), group = severity),
+            position = position_dodge(width = 0.9), vjust = -0.5,size = 3,fontface = "bold") +
+  theme(
+        legend.position = "bottom",
+        plot.title = element_text(face = "bold",hjust = 0.5)
+       )
+
+y_bar
 ```
 
 
+### Numerical Predictors
+```{r}
+skimr::skim(train)
 
+# Multicollinearity
 
+corrplot(cor(train[, 1:6]), method = "circle", type = "full")
+
+# Multicollinearity presents.
+
+# Density Plots
+theme1 <- transparentTheme(trans = .8)
+trellis.par.set(theme1)
+
+density <- featurePlot(x = train[, 1:6],
+                       y = train$severity,
+                       scales = list(x = list(relation = "free"),
+                                     y = list(relation = "free")),
+                       plot = "density", pch = "|",
+                       auto.key = list(columns = 2),
+                       labels = c("value","density"),
+                       main = "Density Plots of Numerical Predictors by Severity 
+of COVID-19 infection")
+density
+```
+
+### Categorical Predictors
+```{r}
+# Bar Chart
+gender_bar <- train %>%
+  ggplot(aes(x = gender, fill = severity)) + 
+  geom_bar(stat = "count", position = "dodge", alpha = 0.8) +
+  labs(x = "Gender", fill = "Severity of COVID-19 infection") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+race_bar <- train %>%
+  ggplot(aes(x = race, fill = severity)) + 
+  geom_bar(stat = "count", position = "dodge", alpha = 0.8) +
+  labs(x = "Race", fill = "Severity of COVID-19 infection") +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+
+smoking_bar <- train %>%
+  ggplot(aes(x = smoking, fill = severity)) + 
+  geom_bar(stat = "count", position = "dodge", alpha = 0.8) +
+  labs(x = "Smoking", fill = "Severity of COVID-19 infection") +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+
+diabetes_bar <- train %>%
+  ggplot(aes(x = diabetes, fill = severity)) + 
+  geom_bar(stat = "count", position = "dodge", alpha = 0.8) +
+  labs(x = "Diabetes", fill = "Severity of COVID-19 infection") +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+      
+hypertension_bar <- train %>%
+  ggplot(aes(x = hypertension, fill = severity)) + 
+  geom_bar(stat = "count", position = "dodge", alpha = 0.8) +
+  labs(x = "Hypertension", fill = "Severity of COVID-19 infection") +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+
+vaccine_bar <- train %>%
+  ggplot(aes(x = vaccine, fill = severity)) + 
+  geom_bar(stat = "count", position = "dodge", alpha = 0.8) +
+  labs(x = "Vaccine", fill = "Severity of COVID-19 infection") +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+
+cate.bar <- gender_bar + race_bar + smoking_bar + 
+  diabetes_bar + hypertension_bar + vaccine_bar +
+  plot_layout(ncol = 2) + 
+  plot_annotation(title = "Bar Charts of Severity of COVID-19 Infection 
+by Categorical Predictors")
+cate.bar + plot_layout(guides = 'collect') & 
+  theme(legend.position = "bottom", plot.title = element_text(hjust = 0.5))
+```
+
+## Model Training
 
 
 
