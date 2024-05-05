@@ -51,6 +51,8 @@ library(gtsummary)
 library(e1071)
 library(tidymodels)
 library(patchwork)
+library(kernlab)
+library(doParallel)
 ```
 
 ## Data Import and Wrangling
@@ -67,37 +69,37 @@ train <- training_data %>%
   select(-id) %>%
   select(age,height,weight,bmi,sbp,ldl,everything()) %>%
   mutate(
-    gender = factor(gender,levels = c("0", "1"), labels = c("Female", "Male")),
-    race = factor(race,levels = c("1", "2","3","4")
-                  , labels = c("White", "Asian","Black","Hispanic")),
-    smoking = factor(smoking,levels = c("0","1", "2")
-                  , labels = c("Never smoked", "Former smoker","Current smoker")),
-    hypertension = factor(hypertension,levels = c("0", "1")
-                             , labels = c("No", "Yes")),
-    diabetes = factor(diabetes,levels = c("0", "1")
-                             , labels = c("No", "Yes")),
-    vaccine = factor(vaccine,levels = c("0", "1")
-                             , labels = c("Not vaccinated", "Vaccinated")),
-    severity = factor(severity,levels = c("0", "1")
-                             , labels = c("Not severe", "severe"))
+    gender = factor(gender,levels = c("0","1"), labels = c("Female", "Male")),
+    race = factor(race,levels = c("1","2","3","4"),
+                  labels = c("White", "Asian","Black","Hispanic")),
+    smoking = factor(smoking,levels = c("0","1","2"),
+                     labels = c("Never_smoked", "Former_smoker","Current_smoker")),
+    hypertension = factor(hypertension,levels = c("0", "1"),
+                          labels = c("No", "Yes")),
+    diabetes = factor(diabetes,levels = c("0", "1"),
+                      labels = c("No", "Yes")),
+    vaccine = factor(vaccine,levels = c("0", "1"),
+                     labels = c("Not_vaccinated", "Vaccinated")),
+    severity = factor(severity,levels = c("0", "1"),
+                      labels = c("not_severe", "severe"))
       )
 test <- test_data %>%
   janitor::clean_names() %>%
   select(-id) %>%
   mutate(
-    gender = factor(gender,levels = c("0", "1"), labels = c("Female", "Male")),
-    race = factor(race,levels = c("1", "2","3","4")
-                  , labels = c("White", "Asian","Black","Hispanic")),
-    smoking = factor(smoking,levels = c("0","1", "2")
-                  , labels = c("Never smoked", "Former smoker","Current smoker")),
-    hypertension = factor(hypertension,levels = c("0", "1")
-                             , labels = c("No", "Yes")),
-    diabetes = factor(diabetes,levels = c("0", "1")
-                             , labels = c("No", "Yes")),
-    vaccine = factor(vaccine,levels = c("0", "1")
-                             , labels = c("Not vaccinated", "Vaccinated")),
-    severity = factor(severity,levels = c("0", "1")
-                             , labels = c("Not severe", "severe"))
+    gender = factor(gender,levels = c("0","1"), labels = c("Female", "Male")),
+    race = factor(race,levels = c("1","2","3","4"),
+                  labels = c("White", "Asian","Black","Hispanic")),
+    smoking = factor(smoking,levels = c("0","1","2"),
+                     labels = c("Never_smoked", "Former_smoker","Current_smoker")),
+    hypertension = factor(hypertension,levels = c("0", "1"),
+                          labels = c("No", "Yes")),
+    diabetes = factor(diabetes,levels = c("0", "1"),
+                      labels = c("No", "Yes")),
+    vaccine = factor(vaccine,levels = c("0", "1"),
+                     labels = c("Not_vaccinated", "Vaccinated")),
+    severity = factor(severity,levels = c("0", "1"),
+                      labels = c("not_severe", "severe"))
       )
 ```
 
@@ -206,5 +208,152 @@ cate.bar + plot_layout(guides = 'collect') &
 
 ## Model Training
 
+Using caret
 
+### Penalized Logistic Regression
+```{r}
+registerDoParallel(detectCores() - 1)
+ctrl <- trainControl(method = "cv", number = 10,
+                     allowParallel = TRUE)
+
+glmnGrid <- expand.grid(.alpha = seq(0, 1, length = 21),
+                        .lambda = exp(seq(-6, 3, length = 50)))
+
+set.seed(2358)
+glmn.fit <- train(severity ~ .,
+                 data = train,
+                 method = "glmnet",
+                 tuneGrid = glmnGrid,
+                 trControl = ctrl)
+glmn.fit$bestTune # within the range
+
+# Performance Evaluation
+glmn.pred.prob <- predict(glmn.fit, newdata = test,type = "prob") [,2]
+glmn.pred <- rep("not_severe", length(glmn.pred.prob))
+glmn.pred[glmn.pred.prob>0.5] <- "severe"
+
+confusionMatrix(data = as.factor(glmn.pred),
+                reference = test$severity,
+                positive = "severe")
+
+coef(glmn.fit$finalModel, s = glmn.fit$bestTune$lambda)
+
+vip(glmn.fit$finalModel)
+```
+
+### MARS
+```{r}
+set.seed(2358)
+mars.fit <- train(severity ~ .,
+                    data = train,
+                    method = "earth",
+                    tuneGrid = expand.grid(degree = 1:3, 
+                                           nprune = 2:25),
+                    trControl = ctrl)
+
+ggplot(mars.fit, highlight = TRUE)
+
+# Performance Evaluation
+mars.pred <- predict(mars.fit, newdata = test)
+
+confusionMatrix(data = as.factor(mars.pred),
+                reference = test$severity,
+                positive = "severe")
+```
+
+
+### SVM-Radial Kernel
+```{r}
+svmr.grid <- expand.grid(C = exp(seq(-2,6,len=50)),
+                         sigma = exp(seq(-6,-2,len=20)))
+set.seed(2358)
+svmr.fit <- train(severity ~ ., 
+                  data = train,
+                  method = "svmRadialSigma",
+                  tuneGrid = svmr.grid,
+                  trControl = ctrl)
+
+plot(svmr.fit, transform.y = log, transform.x = log, 
+     color.palette = terrain.colors)
+
+# Performance Evaluation
+svmr.pred <- predict(svmr.fit, newdata = test)
+
+confusionMatrix(data = as.factor(svmr.pred),
+                reference = test$severity,
+                positive = "severe")
+```
+
+### Random Forest
+```{r}
+rf.grid <- expand.grid(mtry = 1:13,
+                       splitrule = "gini",
+                       min.node.size = 1:6)
+set.seed(2358)
+rf.fit <- train(severity ~ ., 
+                  data = train,
+                  method = "ranger",
+                  tuneGrid = rf.grid,
+                  trControl = ctrl)
+
+ggplot(rf.fit, highlight = TRUE)
+
+# Performance Evaluation
+rf.pred <- predict(rf.fit, newdata = test)
+
+confusionMatrix(data = as.factor(rf.pred),
+                reference = test$severity,
+                positive = "severe")
+```
+
+### Classification Tree(Adaboost)
+```{r}
+gbmA.grid <- expand.grid(n.trees = c(2000,3000,4000,5000),
+                         interaction.depth = 1:10,
+                         shrinkage = c(0.001,0.002,0.003),
+                         n.minobsinnode = 1)
+set.seed(2358)
+gbmA.fit <- train(severity ~ .,
+                  data = train,
+                  method = "gbm",
+                  tuneGrid = gbmA.grid,
+                  trControl = ctrl,
+                  distribution = "adaboost",
+                  verbose = FALSE)
+
+ggplot(gbmA.fit, highlight = TRUE)
+
+# Variable importance
+summary(gbmA.fit$finalModel, las = 2, cBars = 7, cex.names = 0.6)
+
+# Performance Evaluation
+gbmA.pred <- predict(gbmA.fit, newdata = test)
+
+confusionMatrix(data = as.factor(gbmA.pred),
+                reference = test$severity,
+                positive = "severe")
+```
+
+### Comparison
+```{r}
+res <- resamples(
+  list(
+    Glm_net = glmn.fit,
+    MARS = mars.fit, 
+    SVM_Radial = svmr.fit,
+    Random_Forest = rf.fit,
+    CT_Adaboost = gbmA.fit
+    ))
+summary(res)
+
+bwplot(res, metric="Accuracy")
+
+res$values %>% 
+  dplyr::select(1, ends_with("Accuracy")) %>%
+  gather(model, Accuracy, -1) %>% 
+  mutate(model = sub("~Accuracy", "", model)) %>% 
+  ggplot() + 
+  geom_boxplot(aes(x = Accuracy, y = model)) +
+  labs(x = "CV Accuracy", y = "Models")
+```
 
