@@ -73,7 +73,8 @@ train <- training_data %>%
     race = factor(race,levels = c("1","2","3","4"),
                   labels = c("White", "Asian","Black","Hispanic")),
     smoking = factor(smoking,levels = c("0","1","2"),
-                     labels = c("Never_smoked", "Former_smoker","Current_smoker")),
+                     labels = c("Never_smoked", "Former_smoker",
+                                "Current_smoker")),
     hypertension = factor(hypertension,levels = c("0", "1"),
                           labels = c("No", "Yes")),
     diabetes = factor(diabetes,levels = c("0", "1"),
@@ -91,7 +92,8 @@ test <- test_data %>%
     race = factor(race,levels = c("1","2","3","4"),
                   labels = c("White", "Asian","Black","Hispanic")),
     smoking = factor(smoking,levels = c("0","1","2"),
-                     labels = c("Never_smoked", "Former_smoker","Current_smoker")),
+                     labels = c("Never_smoked", "Former_smoker",
+                                "Current_smoker")),
     hypertension = factor(hypertension,levels = c("0", "1"),
                           labels = c("No", "Yes")),
     diabetes = factor(diabetes,levels = c("0", "1"),
@@ -116,7 +118,8 @@ y_bar <- train %>%
   labs(x = "severity", fill = "severity",title = "Bar Chart of Severity of COVID-19
        infection") + 
   geom_text(stat = "Count", aes(label = after_stat(count), group = severity),
-            position = position_dodge(width = 0.9), vjust = -0.5,size = 3,fontface = "bold") +
+            position = position_dodge(width = 0.9), vjust = -0.5,size = 3,
+            fontface = "bold") +
   theme(
         legend.position = "bottom",
         plot.title = element_text(face = "bold",hjust = 0.5)
@@ -227,6 +230,9 @@ glmn.fit <- train(severity ~ .,
                  trControl = ctrl)
 glmn.fit$bestTune # within the range
 
+plot(glmn.fit, transform.y = log, transform.x = log, 
+     color.palette = terrain.colors)
+
 # Performance Evaluation
 glmn.pred.prob <- predict(glmn.fit, newdata = test,type = "prob") [,2]
 glmn.pred <- rep("not_severe", length(glmn.pred.prob))
@@ -250,6 +256,7 @@ mars.fit <- train(severity ~ .,
                     tuneGrid = expand.grid(degree = 1:3, 
                                            nprune = 2:25),
                     trControl = ctrl)
+mars.fit$bestTune
 
 ggplot(mars.fit, highlight = TRUE)
 
@@ -272,6 +279,7 @@ svmr.fit <- train(severity ~ .,
                   method = "svmRadialSigma",
                   tuneGrid = svmr.grid,
                   trControl = ctrl)
+svmr.fit$bestTune
 
 plot(svmr.fit, transform.y = log, transform.x = log, 
      color.palette = terrain.colors)
@@ -295,6 +303,7 @@ rf.fit <- train(severity ~ .,
                   method = "ranger",
                   tuneGrid = rf.grid,
                   trControl = ctrl)
+rf.fit$bestTune
 
 ggplot(rf.fit, highlight = TRUE)
 
@@ -320,6 +329,7 @@ gbmA.fit <- train(severity ~ .,
                   trControl = ctrl,
                   distribution = "adaboost",
                   verbose = FALSE)
+gbmA.fit$bestTune
 
 ggplot(gbmA.fit, highlight = TRUE)
 
